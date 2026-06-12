@@ -1,0 +1,6 @@
+# Browser MCP artifacts
+.playwright-mcp/
+.hermes/screenshots/
+
+# Old screenshots
+rubik-check.png
