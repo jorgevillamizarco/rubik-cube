@@ -65,7 +65,7 @@
   <div id="move-counter">Moves: 0</div>
   <div id="controls">
     <button id="btn-scramble" aria-label="Scramble the cube with 20 random moves">Scramble</button>
-    <button id="btn-solve" aria-label="Automatically solve the cube using Kociemba two-phase algorithm" disabled>Solve</button>
+    <button id="btn-solve" aria-label="Automatically solve the cube using Kociemba two-phase algorithm">Solve</button>
     <button id="btn-reset" aria-label="Reset the cube to its solved state">Reset</button>
   </div>
   <div id="drag-indicator"></div>
@@ -179,7 +179,8 @@ function createCubie(x, y, z) {
 
   const bodyGeo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
   const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({
-    color: 0x1a1a2e, roughness: 0.4, metalness: 0.05,
+  color: 0x1a1a2e, roughness: 0.4, metalness: 0.05,
+  polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
   }));
   body.renderOrder = 0;
   g.add(body);
@@ -206,7 +207,6 @@ function createCubie(x, y, z) {
       roughness: 0.3,
       metalness: 0.0,
       side: THREE.DoubleSide,
-      depthFunc: THREE.AlwaysDepth,
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 1;
@@ -567,9 +567,11 @@ function restoreCubeState(savedState) {
  */
 async function autoSolve() {
   if (STATE.busy) return;
+  // Lazy-init solver on first Solve click
   if (!STATE.solverReady) {
-    showStatus('Solver not ready yet — please wait', 'error');
-    return;
+    showStatus('Loading solver...', 'initializing');
+    await initSolver();
+    if (!STATE.solverReady) return; // init failed
   }
   // If cube is already solved, show message instead of silent no-op
   if (checkSolved()) {
@@ -593,6 +595,8 @@ async function autoSolve() {
     disableButtons();
 
     showStatus('Computing optimal solution...', 'solving');
+    // Yield main thread so status message renders before blocking solve call
+    await new Promise(r => setTimeout(r, 80));
     const facelets = getSolverFacelets();
     const cube = window.Cube.fromString(facelets);
     const solution = (cube.solve() || '').trim();
@@ -1011,9 +1015,9 @@ async function initSolver() {
   }
 }
 
-// Initialize the cube and start the solver
+// Initialize the cube and start rendering
+// Solver initializes lazily on first Solve click to avoid blocking page load
 buildCube();
-initSolver();
 animate();
 
 // Wire up test helpers
