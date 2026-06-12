@@ -235,7 +235,6 @@ function buildCube() {
   STATE.cubies.forEach(c => scene.remove(c));
   STATE.cubies = [];
   STATE.history = [];
-  STATE.moves = 0;
   STATE.solved = true;
   for (let x = -1; x <= 1; x++)
     for (let y = -1; y <= 1; y++)
@@ -283,6 +282,15 @@ function updateStickersAfterRotation(cubie, pivotRotationAxis, pivotRotationAngl
   }
 
   cubie.userData.stickers = newStickers;
+  // Also update physical mesh userData.faceName for consistency
+  cubie.children.forEach(child => {
+    if (child.isMesh && child.userData.faceName) {
+      const normal = FACE_NORMALS[child.userData.faceName].clone();
+      normal.applyQuaternion(rotationQuat);
+      const newFace = faceNormalToFaceName(normal);
+      if (newFace) child.userData.faceName = newFace;
+    }
+  });
   // NOTE: Sticker mesh colors are intentionally NOT modified here.
   // Each sticker mesh is a rigid child of the cubie group — it rotates with the
   // cubie and keeps its original color, exactly like a physical sticker on a
@@ -343,12 +351,26 @@ function turnLayer(axis, layer, angle, dur = ROT_DUR) {
           c.getWorldPosition(worldPos);
           c.getWorldQuaternion(worldQuat);
 
-          // Snap to exact 90° increments for numerical stability
-          const euler = new THREE.Euler().setFromQuaternion(worldQuat);
-          euler.x = Math.round(euler.x / (Math.PI / 2)) * (Math.PI / 2);
-          euler.y = Math.round(euler.y / (Math.PI / 2)) * (Math.PI / 2);
-          euler.z = Math.round(euler.z / (Math.PI / 2)) * (Math.PI / 2);
-          const snappedQ = new THREE.Quaternion().setFromEuler(euler);
+          // Snap to exact 90° quaternion increments (avoids Euler gimbal lock)
+          const snapQuat = (q) => {
+            const candidates = [];
+            for (let xi = 0; xi < 4; xi++) {
+              for (let yi = 0; yi < 4; yi++) {
+                for (let zi = 0; zi < 4; zi++) {
+                  const e = new THREE.Euler(xi * Math.PI/2, yi * Math.PI/2, zi * Math.PI/2);
+                  candidates.push(new THREE.Quaternion().setFromEuler(e));
+                }
+              }
+            }
+            let best = candidates[0];
+            let bestDot = Math.abs(q.dot(best));
+            for (const c of candidates) {
+              const d = Math.abs(q.dot(c));
+              if (d > bestDot) { bestDot = d; best = c; }
+            }
+            return best;
+          };
+          const snappedQ = snapQuat(worldQuat);
 
           c.userData.grid = { x: gx, y: gy, z: gz };
           updateStickersAfterRotation(c, axis, angle);
@@ -402,7 +424,6 @@ async function doMove(m) {
   if (!parsed) return;
   await turnLayer(parsed.axis, parsed.layer, parsed.angle, SCRAMBLE_SPEED);
   STATE.history.push(m);
-  STATE.moves++;
   updateMoveCounter();
 }
 
@@ -429,7 +450,6 @@ async function scramble() {
       if (!parsed) continue;
       await turnLayer(parsed.axis, parsed.layer, parsed.angle, SCRAMBLE_SPEED);
       STATE.history.push(m);
-      STATE.moves++;
       updateMoveCounter();
     }
 
@@ -546,9 +566,16 @@ function restoreCubeState(savedState) {
  * Solve the cube using the Kociemba two-phase algorithm on the actual cube state.
  */
 async function autoSolve() {
-  if (STATE.busy || !STATE.history.length) return;
+  if (STATE.busy) return;
   if (!STATE.solverReady) {
     showStatus('Solver not ready yet — please wait', 'error');
+    return;
+  }
+  // If cube is already solved, show message instead of silent no-op
+  if (checkSolved()) {
+    STATE.history = [];
+    updateMoveCounter();
+    showStatus('Already solved! 🎉', 'solved');
     return;
   }
 
@@ -575,7 +602,6 @@ async function autoSolve() {
     if (!solutionMoves.length) {
       if (checkSolved()) {
         STATE.history = [];
-        STATE.moves = 0;
         updateMoveCounter();
         STATE.solved = true;
         showStatus('Solved! 🎉', 'solved');
@@ -600,7 +626,6 @@ async function autoSolve() {
 
     STATE.solved = true;
     STATE.history = [];
-    STATE.moves = 0;
     updateMoveCounter();
     showStatus('Solved! 🎉', 'solved');
   } catch (e) {
@@ -608,7 +633,6 @@ async function autoSolve() {
     showStatus('Solver error', 'error');
     restoreCubeState(savedState);
     STATE.history = originalHistory;
-    STATE.moves = originalHistory.length;
     updateMoveCounter();
     STATE.solved = false;
   } finally {
@@ -683,6 +707,8 @@ function hideStatus() {
 }
 
 function updateMoveCounter() {
+  // Derive from history for consistency
+  STATE.moves = STATE.history.length;
   moveCounterEl.textContent = `Moves: ${STATE.moves}`;
 }
 
@@ -717,6 +743,14 @@ function getPointerPos(e) {
 function onPointerDown(e) {
   if (STATE.busy) return;
 
+  // Disable orbit IMMEDIATELY when shift is pressed, before orbit processes the event
+  if (e.shiftKey) {
+    orbit.enabled = false;
+  } else {
+    orbit.enabled = true;
+    return; // Let orbit handle normal camera rotation
+  }
+
   e.preventDefault();
 
   // Reset drag state
@@ -732,12 +766,7 @@ function onPointerDown(e) {
   dragLayer = null;
   dragAngle = null;
 
-  // Only handle drag if Shift is pressed (face turn); otherwise OrbitControls handles camera rotation
-  if (!e.shiftKey) {
-    orbit.enabled = true;
-    return;
-  }
-
+  // At this point we know shift was pressed (orbit disabled above); proceed with raycast
   ndc.set((pos.x / innerWidth) * 2 - 1, -(pos.y / innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
 
@@ -909,7 +938,6 @@ function onPointerMove(e) {
 
     turnLayer(dragAxis, dragLayer, moveAngle, 0.3).then(() => {
       STATE.history.push(notation);
-      STATE.moves++;
       updateMoveCounter();
       STATE.solved = false;
       orbit.enabled = true;
@@ -926,6 +954,7 @@ function onPointerUp(e) {
   dragActive = false;
   dragAxis = null;
   dragAngle = null;
+  dragLastPos = null;
   dragArrowEl.style.display = 'none';
   dragIndicatorEl.style.display = 'none';
   dragCommitted = false;
