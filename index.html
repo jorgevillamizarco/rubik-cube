@@ -404,15 +404,17 @@ MOVES.forEach(m => { INV[m] = m.endsWith("'") ? m[0] : m + "'"; });
 function parseMove(notation) {
   const letter = notation.charAt(0);
   const suffix = notation.slice(1);
-  // Standard Rubik's notation: R = clockwise on right face = +90° around x.
-  // Prime (' ) = counterclockwise = -90° around the axis.
+  // Standard Rubik's notation: R = clockwise on right face.
+  // Prime (' ) = counterclockwise.
   const dir = suffix === "'" ? -1 : 1;
   const halfTurns = suffix === "2" ? 2 : 1;
   const name = NAME_FROM_NOTATION[letter];
   if (!name) return null;
   const a = FACE_AXIS[name];
-  // All face turns follow the same clockwise-from-outside convention as cubejs.
-  const sign = -1;
+  // Clockwise-from-outside: for positive-axis faces (R,U,F) rotate by -π/2;
+  // for negative-axis faces (L,D,B) rotate by +π/2.
+  // This matches cubejs move conventions exactly.
+  const sign = a.l > 0 ? -1 : 1;
   return { axis: a.a, layer: a.l, angle: sign * dir * Math.PI / 2 * halfTurns };
 }
 
@@ -507,11 +509,11 @@ function getSolverFacelets() {
   // Cube.fromString() uses face order U, R, F, D, L, B.
   // Each face is read top-left to bottom-right from that face's perspective.
   const faces = [
-    ['up',    [[-1, 1,  1], [0, 1,  1], [1, 1,  1], [-1, 1,  0], [0, 1,  0], [1, 1,  0], [-1, 1, -1], [0, 1, -1], [1, 1, -1]]],
+    ['up',    [[-1, 1, -1], [0, 1, -1], [1, 1, -1], [-1, 1,  0], [0, 1,  0], [1, 1,  0], [-1, 1,  1], [0, 1,  1], [1, 1,  1]]],
     ['right', [[ 1, 1,  1], [1, 1,  0], [1, 1, -1], [ 1, 0,  1], [1, 0,  0], [1, 0, -1], [ 1,-1,  1], [1,-1,  0], [1,-1, -1]]],
     ['front', [[-1, 1,  1], [0, 1,  1], [1, 1,  1], [-1, 0,  1], [0, 0,  1], [1, 0,  1], [-1,-1,  1], [0,-1,  1], [1,-1,  1]]],
     ['down',  [[-1,-1,  1], [0,-1,  1], [1,-1,  1], [-1,-1, 0], [0,-1, 0], [1,-1, 0], [-1,-1,-1], [0,-1,-1], [1,-1,-1]]],
-    ['left',  [[-1, 1,  1], [-1,1,  0], [-1,1, -1], [-1, 0,  1], [-1,0,  0], [-1,0, -1], [-1,-1, 1], [-1,-1, 0], [-1,-1,-1]]],
+    ['left',  [[-1, 1, -1], [-1,1,  0], [-1,1,  1], [-1, 0, -1], [-1,0,  0], [-1,0,  1], [-1,-1, -1], [-1,-1, 0], [-1,-1, 1]]],
     ['back',  [[ 1, 1, -1], [0, 1, -1], [-1,1, -1], [ 1, 0, -1], [0, 0, -1], [-1,0, -1], [ 1,-1,-1], [0,-1,-1], [-1,-1,-1]]],
   ];
 
@@ -530,16 +532,22 @@ function getSolverFacelets() {
  * Check if the cube is solved by verifying all cubie positions and stickers.
  */
 function checkSolved() {
-  const tol = 0.01;
   for (const c of STATE.cubies) {
     if (c.userData.grid.x !== c.userData.orig.x ||
         c.userData.grid.y !== c.userData.orig.y ||
         c.userData.grid.z !== c.userData.orig.z) return false;
-    const e = new THREE.Euler().setFromQuaternion(c.quaternion);
-    for (const v of [e.x, e.y, e.z]) {
-      let n = ((v % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      if (n > tol && n < Math.PI * 2 - tol) return false;
-    }
+    // Check orientation via dot-product to nearest 90° increment quaternion.
+    // Euler decomposition fails for compound rotations due to gimbal-lock.
+    const q = c.quaternion;
+    let bestDot = 0;
+    for (let xi = 0; xi < 4; xi++)
+      for (let yi = 0; yi < 4; yi++)
+        for (let zi = 0; zi < 4; zi++) {
+          const cand = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(xi*Math.PI/2, yi*Math.PI/2, zi*Math.PI/2));
+          bestDot = Math.max(bestDot, Math.abs(q.dot(cand)));
+        }
+    if (Math.abs(bestDot - 1) > 0.01) return false;
   }
   for (const face of ['up', 'down', 'left', 'right', 'front', 'back']) {
     if (!isFaceSolved(face)) return false;
