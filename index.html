@@ -807,117 +807,90 @@ function onPointerDown(e) {
     const clickedFace = faceNormalToFaceName(dragFaceNormal);
     if (clickedFace) {
       dragFace = clickedFace;
-      const a = FACE_AXIS[clickedFace];
-      dragLayer = a.l;
-      // Disable orbit controls to prevent camera movement during face turn drag
+      // dragLayer is computed in onPointerMove after we know the rotation axis,
+      // because it's the cubie's position along that axis (not the face's axis)
       orbit.enabled = false;
     }
   }
 }
 
 /**
- * Given a face normal and drag direction in camera-relative screen space,
- * determine the rotation axis (x, y, or z) and sign (+1 or -1).
+ * Given a face name and the clicked cubie's grid position,
+ * determine the rotation axis and drag direction sign.
  *
- * The approach: map the screen-space drag onto the two tangential
- * directions of the face plane in screen space. The larger-magnitude
- * projection picks the axis, and its sign picks the direction.
+ * Uses the cross product of the face normal and the drag tangent direction
+ * to determine the correct rotation axis. This is the physically correct
+ * approach: dragging along a tangent direction rotates the face around
+ * the axis perpendicular to both the normal and the drag direction.
+ *
+ * Also corrects for screen Y inversion (NDC y goes up, pixel y goes down).
  */
-function computeDragAxisAndSign(dragFaceNormal, screenDx, screenDy) {
-  // Get the two tangential world-space directions for this face
-  const face = faceNormalToFaceName(dragFaceNormal);
-  if (!face) return { axis: null, sign: 0 };
-
-  // Tangential directions in world space (both perpendicular to face normal)
+function computeDragAxisAndSign(face, screenDx, screenDy) {
+  // Tangential directions in world space (perpendicular to face normal)
   let tan1, tan2;
   if (face === 'right' || face === 'left') {
-    tan1 = new THREE.Vector3(0, 1, 0); // world Y
-    tan2 = new THREE.Vector3(0, 0, 1); // world Z
+    tan1 = new THREE.Vector3(0, 1, 0);  // world Y
+    tan2 = new THREE.Vector3(0, 0, 1);  // world Z
   } else if (face === 'up' || face === 'down') {
-    tan1 = new THREE.Vector3(1, 0, 0); // world X
-    tan2 = new THREE.Vector3(0, 0, 1); // world Z
+    tan1 = new THREE.Vector3(1, 0, 0);  // world X
+    tan2 = new THREE.Vector3(0, 0, 1);  // world Z
   } else {
-    tan1 = new THREE.Vector3(1, 0, 0); // world X
-    tan2 = new THREE.Vector3(0, 1, 0); // world Y
+    tan1 = new THREE.Vector3(1, 0, 0);  // world X
+    tan2 = new THREE.Vector3(0, 1, 0);  // world Y
   }
 
-  // Project world vectors into screen space using the camera matrix
-  const screenPos = new THREE.Vector3();
-  const screenTan1 = new THREE.Vector3();
-  const screenTan2 = new THREE.Vector3();
-
-  // Project face center to screen, then add small offsets along tan1/tan2
-  const faceCenter = new THREE.Vector3();
-  const camPos = camera.position.clone();
-
-  // Use the hit point as reference, project it to screen
+  // Project tangents to screen space (NDC)
   const hitScreen = dragHitPt.clone().project(camera);
-  const tan1World = dragHitPt.clone().add(tan1.clone().multiplyScalar(0.5));
-  const tan2World = dragHitPt.clone().add(tan2.clone().multiplyScalar(0.5));
+  const tan1Screen = dragHitPt.clone().add(tan1.clone().multiplyScalar(0.5)).project(camera);
+  const tan2Screen = dragHitPt.clone().add(tan2.clone().multiplyScalar(0.5)).project(camera);
 
-  const tan1Screen = tan1World.clone().project(camera);
-  const tan2Screen = tan2World.clone().project(camera);
-
-  // Screen-space direction of each tangent
+  // Screen-space tangent directions in NDC (y goes up in NDC)
   const dir1x = tan1Screen.x - hitScreen.x;
   const dir1y = tan1Screen.y - hitScreen.y;
   const dir2x = tan2Screen.x - hitScreen.x;
   const dir2y = tan2Screen.y - hitScreen.y;
 
-  // Project screen drag onto each tangent's screen direction
+  // Convert pixel deltas to NDC: negate pixel dy (NDC y is up, pixel y is down)
+  const ndcDx = screenDx;
+  const ndcDy = -screenDy;
+
+  // Project drag onto each tangent
   const len1 = Math.sqrt(dir1x * dir1x + dir1y * dir1y) || 1;
   const len2 = Math.sqrt(dir2x * dir2x + dir2y * dir2y) || 1;
 
-  const u1x = dir1x / len1;
-  const u1y = dir1y / len1;
-  const u2x = dir2x / len2;
-  const u2y = dir2y / len2;
+  const proj1 = ndcDx * (dir1x / len1) + ndcDy * (dir1y / len1);
+  const proj2 = ndcDx * (dir2x / len2) + ndcDy * (dir2y / len2);
 
-  const proj1 = screenDx * u1x + screenDy * u1y;
-  const proj2 = screenDx * u2x + screenDy * u2y;
+  // Determine the rotation axis via cross product: normal × dragDirection
+  const faceNormal = FACE_NORMALS[face];
+  let dragDir, projVal;
 
-  // Pick the axis with larger-magnitude projection
-  let axis, sign;
   if (Math.abs(proj1) >= Math.abs(proj2)) {
-    // Determine which world axis tan1 corresponds to
-    axis = (face === 'up' || face === 'down') ? 'x' :
-           (face === 'right' || face === 'left') ? 'y' : 'x';
-    // For up/down faces, tan1=X gives z-axis rotation (rotating X moves around Z)
-    if (face === 'up' || face === 'down') axis = 'z';
-    else if (face === 'front' || face === 'back') axis = 'y';
-    else axis = 'y'; // left/right: tan1=Y gives Y-axis rotation
-    
-    sign = proj1 > 0 ? 1 : -1;
+    dragDir = tan1;
+    projVal = proj1;
   } else {
-    if (face === 'up' || face === 'down') axis = 'x';
-    else if (face === 'front' || face === 'back') axis = 'x';
-    else axis = 'z'; // left/right: tan2=Z gives Z-axis rotation
-    
-    sign = proj2 > 0 ? 1 : -1;
+    dragDir = tan2;
+    projVal = proj2;
   }
 
-  return { axis, sign };
+  // Rotation axis = faceNormal × dragDirection
+  const rotAxis = new THREE.Vector3().crossVectors(faceNormal, dragDir);
+  const axisName = Math.abs(rotAxis.x) > 0.5 ? 'x' :
+                   Math.abs(rotAxis.y) > 0.5 ? 'y' : 'z';
+  const axisSign = rotAxis[axisName] > 0 ? 1 : -1;
+
+  return { axis: axisName, axisSign, dragSign: projVal > 0 ? 1 : -1 };
 }
 
 function onPointerMove(e) {
   if (!dragActive || !dragCubie || dragCommitted) return;
 
   const pos = getPointerPos(e);
-  const dx = pos.x - dragStart.x;
-  const dy = pos.y - dragStart.y;
 
   // Show drag indicator
   dragArrowEl.style.display = 'block';
   dragArrowEl.style.left = pos.x + 'px';
   dragArrowEl.style.top = pos.y + 'px';
-
-  // Rotate the arrow based on drag direction
-  const angle = Math.atan2(dy, dx);
-  dragArrowEl.style.transform = `translate(-50%, -50%) rotate(${angle * 180 / Math.PI + 90}deg)`;
-
-  // Compute screen drag from last position
-  const screenDx = pos.x - (dragLastPos?.x || dragStart.x);
-  const screenDy = pos.y - (dragLastPos?.y || dragStart.y);
 
   // Determine axis and sign from accumulated drag
   const accumDx = pos.x - dragStart.x;
@@ -925,10 +898,13 @@ function onPointerMove(e) {
   const accumDist = Math.sqrt(accumDx * accumDx + accumDy * accumDy);
 
   if (accumDist > DRAG_THRESHOLD && !dragAxis) {
-    const { axis, sign } = computeDragAxisAndSign(dragFaceNormal, accumDx, accumDy);
+    const { axis, axisSign, dragSign } = computeDragAxisAndSign(dragFace, accumDx, accumDy);
     if (axis) {
       dragAxis = axis;
-      dragAngle = sign;
+      // Layer = clicked cubie's position along the rotation axis
+      dragLayer = Math.round(dragCubie.userData.grid[axis]);
+      // Combined sign: axis direction from cross product * drag direction
+      dragAngle = axisSign * dragSign;
     }
   }
 
@@ -939,14 +915,23 @@ function onPointerMove(e) {
     dragCommitted = true;
     dragArrowEl.style.display = 'none';
 
-    // Convert axis + sign to a notation move
-    // The angle sign convention must match parseMove's convention:
-    // parseMove('R') → angle = sign * dir * π/2 = -1 * 1 * π/2 = -π/2
-    // So +1 drag sign → angle = -π/2 (clockwise on face from outside)
-    const moveAngle = -dragAngle * Math.PI / 2;
+    // moveAngle: positive = rotation in +axis direction
+    const moveAngle = dragAngle * Math.PI / 2;
 
-    const notationChar = NOTATION_FROM_NAME[dragFace];
-    const notation = dragAngle === 1 ? notationChar : notationChar + "'";
+    // Derive notation from the rotation axis and layer (not the clicked face)
+    // axis x → R (layer 1) or L (layer -1)
+    // axis y → U (layer 1) or D (layer -1)
+    // axis z → F (layer 1) or B (layer -1)
+    const AXIS_FACE = { x: { 1: 'right', '-1': 'left' }, y: { 1: 'up', '-1': 'down' }, z: { 1: 'front', '-1': 'back' } };
+    const moveFaceName = AXIS_FACE[dragAxis][dragLayer];
+    const moveFaceAxisInfo = FACE_AXIS[moveFaceName];
+    // Clockwise from outside: positive-axis faces use -π/2, negative-axis use +π/2
+    // Our moveAngle is +π/2 when dragAngle > 0 (rotation in +axis direction)
+    // For positive-axis faces: -π/2 = clockwise. So +π/2 = counterclockwise = prime.
+    // For negative-axis faces: +π/2 = clockwise. So +π/2 = clockwise = no prime.
+    const isPrime = (moveFaceAxisInfo.l > 0) ? (dragAngle > 0) : (dragAngle < 0);
+    const notationChar = NOTATION_FROM_NAME[moveFaceName];
+    const notation = isPrime ? notationChar + "'" : notationChar;
 
     turnLayer(dragAxis, dragLayer, moveAngle, 0.3).then(() => {
       STATE.history.push(notation);
