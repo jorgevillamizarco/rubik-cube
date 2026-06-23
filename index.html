@@ -59,11 +59,11 @@
     }
     #debug-log {
       position: fixed; top: 20px; left: 20px;
-      width: 320px; max-height: 250px; overflow-y: auto;
+      width: 320px; max-height: 250px;
       background: rgba(10, 10, 20, 0.85); color: #4ade80;
       font-family: monospace; font-size: 11px; padding: 12px;
       border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px; z-index: 100; pointer-events: none;
+      border-radius: 8px; z-index: 100; pointer-events: auto;
       display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
       backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     }
@@ -75,7 +75,10 @@
   <div id="info"><div id="status"></div></div>
   <div id="instructions">Drag background to rotate view · Drag on a face to turn</div>
   <div id="move-counter">Moves: 0</div>
-  <div id="debug-log"></div>
+  <div id="debug-log">
+    <button id="btn-copy-debug" style="position: absolute; top: 10px; right: 10px; padding: 6px 12px; font-size: 11px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; color: #eee; cursor: pointer; font-weight: 600; font-family: sans-serif; transition: background 0.2s;">Copy</button>
+    <div id="debug-log-content" style="margin-top: 25px; max-height: 200px; overflow-y: auto;"></div>
+  </div>
   <div id="controls">
     <button id="btn-scramble" aria-label="Scramble the cube with 20 random moves">Scramble</button>
     <button id="btn-solve" aria-label="Automatically solve the cube using Kociemba two-phase algorithm">Solve</button>
@@ -760,17 +763,17 @@ function updateMoveCounter() {
   moveCounterEl.textContent = `Moves: ${STATE.moves}`;
 }
 
-const debugLogEl = document.getElementById('debug-log');
+const debugLogContentEl = document.getElementById('debug-log-content');
 function logDebug(msg) {
   console.log('[DEBUG]', msg);
-  if (!debugLogEl) return;
+  if (!debugLogContentEl) return;
   const div = document.createElement('div');
   div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  debugLogEl.appendChild(div);
-  while (debugLogEl.children.length > 40) {
-    debugLogEl.removeChild(debugLogEl.firstChild);
+  debugLogContentEl.appendChild(div);
+  while (debugLogContentEl.children.length > 40) {
+    debugLogContentEl.removeChild(debugLogContentEl.firstChild);
   }
-  debugLogEl.scrollTop = debugLogEl.scrollHeight;
+  debugLogContentEl.scrollTop = debugLogContentEl.scrollHeight;
 }
 
 function disableButtons() {
@@ -1034,6 +1037,18 @@ document.getElementById('btn-debug').addEventListener('click', () => {
     const isHidden = window.getComputedStyle(panel).display === 'none';
     panel.style.display = isHidden ? 'block' : 'none';
   }
+});
+
+document.getElementById('btn-copy-debug').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const text = Array.from(document.querySelectorAll('#debug-log-content div'))
+    .map(el => el.textContent)
+    .join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btn-copy-debug');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  });
 });
 
 window.addEventListener('resize', () => {
