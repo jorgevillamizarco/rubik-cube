@@ -57,17 +57,30 @@
       font-size: 14px; opacity: 0.5; z-index: 10; pointer-events: none;
       text-shadow: 0 0 10px rgba(0,0,0,0.9);
     }
+    #debug-log {
+      position: fixed; top: 20px; left: 20px;
+      width: 320px; max-height: 250px; overflow-y: auto;
+      background: rgba(10, 10, 20, 0.85); color: #4ade80;
+      font-family: monospace; font-size: 11px; padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px; z-index: 100; pointer-events: none;
+      display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    }
+    #debug-log div { margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 2px; }
   </style>
 </head>
 <body>
   <div id="canvas-container"></div>
   <div id="info"><div id="status"></div></div>
-  <div id="instructions">Drag background to rotate view · Shift+Drag on a face to turn</div>
+  <div id="instructions">Drag background to rotate view · Drag on a face to turn</div>
   <div id="move-counter">Moves: 0</div>
+  <div id="debug-log"></div>
   <div id="controls">
     <button id="btn-scramble" aria-label="Scramble the cube with 20 random moves">Scramble</button>
     <button id="btn-solve" aria-label="Automatically solve the cube using Kociemba two-phase algorithm">Solve</button>
     <button id="btn-reset" aria-label="Reset the cube to its solved state">Reset</button>
+    <button id="btn-debug" aria-label="Toggle interaction debug logs" style="opacity: 0.6; font-size: 13px; padding: 12px 18px;">Debug</button>
   </div>
   <div id="drag-indicator"></div>
   <svg id="drag-arrow" viewBox="0 0 60 60">
@@ -747,6 +760,19 @@ function updateMoveCounter() {
   moveCounterEl.textContent = `Moves: ${STATE.moves}`;
 }
 
+const debugLogEl = document.getElementById('debug-log');
+function logDebug(msg) {
+  console.log('[DEBUG]', msg);
+  if (!debugLogEl) return;
+  const div = document.createElement('div');
+  div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  debugLogEl.appendChild(div);
+  while (debugLogEl.children.length > 40) {
+    debugLogEl.removeChild(debugLogEl.firstChild);
+  }
+  debugLogEl.scrollTop = debugLogEl.scrollHeight;
+}
+
 function disableButtons() {
   document.querySelectorAll('#controls button').forEach(btn => btn.disabled = true);
 }
@@ -811,6 +837,8 @@ function onPointerDown(e) {
     if (clickedFace) {
       dragFace = clickedFace;
     }
+
+    logDebug(`[Down] Face: ${clickedFace || 'unknown'}, Cubie orig: (${dragCubie.userData.orig.x}, ${dragCubie.userData.orig.y}, ${dragCubie.userData.orig.z}), grid: (${Math.round(dragCubie.userData.grid.x)}, ${Math.round(dragCubie.userData.grid.y)}, ${Math.round(dragCubie.userData.grid.z)})`);
 
     // Reset drag state
     dragLastPos = null;
@@ -900,6 +928,15 @@ function computeDragAxisAndSign(face, screenDx, screenDy) {
                    Math.abs(rotAxis.y) > 0.5 ? 'y' : 'z';
   const axisSign = rotAxis[axisName] > 0 ? 1 : -1;
 
+  const rotAxis1 = new THREE.Vector3().crossVectors(faceNormal, tan1);
+  const name1 = Math.abs(rotAxis1.x) > 0.5 ? 'x' : Math.abs(rotAxis1.y) > 0.5 ? 'y' : 'z';
+  const rotAxis2 = new THREE.Vector3().crossVectors(faceNormal, tan2);
+  const name2 = Math.abs(rotAxis2.x) > 0.5 ? 'x' : Math.abs(rotAxis2.y) > 0.5 ? 'y' : 'z';
+
+  logDebug(`[Drag] dx=${screenDx.toFixed(1)}, dy=${screenDy.toFixed(1)}`);
+  logDebug(`[Drag] Projections: ${name1}=${proj1.toFixed(1)}, ${name2}=${proj2.toFixed(1)}`);
+  logDebug(`[Drag] Result axis: ${axisName}, axisSign: ${axisSign}, dragSign: ${projVal > 0 ? 1 : -1}`);
+
   return { axis: axisName, axisSign, dragSign: projVal > 0 ? 1 : -1 };
 }
 
@@ -957,6 +994,8 @@ function onPointerMove(e) {
     const notationChar = NOTATION_FROM_NAME[moveFaceName];
     const notation = isPrime ? notationChar + "'" : notationChar;
 
+    logDebug(`[Commit] Move: ${notation}, axis: ${dragAxis}, layer: ${dragLayer}, angle: ${moveAngle.toFixed(2)}`);
+
     turnLayer(dragAxis, dragLayer, moveAngle, 0.3).then(() => {
       STATE.history.push(notation);
       updateMoveCounter();
@@ -989,6 +1028,13 @@ document.addEventListener('pointerup', onPointerUp);
 document.getElementById('btn-scramble').addEventListener('click', scramble);
 document.getElementById('btn-solve').addEventListener('click', autoSolve);
 document.getElementById('btn-reset').addEventListener('click', resetCube);
+document.getElementById('btn-debug').addEventListener('click', () => {
+  const panel = document.getElementById('debug-log');
+  if (panel) {
+    const isHidden = window.getComputedStyle(panel).display === 'none';
+    panel.style.display = isHidden ? 'block' : 'none';
+  }
+});
 
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
