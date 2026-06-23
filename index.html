@@ -50,7 +50,6 @@
     #drag-arrow {
       position: fixed; z-index: 21; pointer-events: none; display: none;
       width: 60px; height: 60px; transform: translate(-50%, -50%);
-      transition: transform 0.1s ease-out;
     }
     #move-counter {
       position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
@@ -949,6 +948,12 @@ function onPointerMove(e) {
   const accumDx = pos.x - dragStart.x;
   const accumDy = pos.y - dragStart.y;
   const accumDist = Math.sqrt(accumDx * accumDx + accumDy * accumDy);
+
+  if (accumDist > 2) {
+    const angleRad = Math.atan2(accumDy, accumDx);
+    const angleDeg = angleRad * 180 / Math.PI;
+    dragArrowEl.style.transform = `translate(-50%, -50%) rotate(${angleDeg}deg)`;
+  }
 
   if (accumDist > DRAG_THRESHOLD && !dragAxis) {
     const { axis, axisSign, dragSign } = computeDragAxisAndSign(dragFace, accumDx, accumDy);
