@@ -859,22 +859,28 @@ function computeDragAxisAndSign(face, screenDx, screenDy) {
   const tan1Screen = dragHitPt.clone().add(tan1.clone().multiplyScalar(0.5)).project(camera);
   const tan2Screen = dragHitPt.clone().add(tan2.clone().multiplyScalar(0.5)).project(camera);
 
-  // Screen-space tangent directions in NDC (y goes up in NDC)
-  const dir1x = tan1Screen.x - hitScreen.x;
-  const dir1y = tan1Screen.y - hitScreen.y;
-  const dir2x = tan2Screen.x - hitScreen.x;
-  const dir2y = tan2Screen.y - hitScreen.y;
+  // Convert NDC to screen pixels
+  const toPixel = (pt) => ({
+    x: (pt.x + 1) * window.innerWidth / 2,
+    y: (1 - pt.y) * window.innerHeight / 2
+  });
 
-  // Convert pixel deltas to NDC: negate pixel dy (NDC y is up, pixel y is down)
-  const ndcDx = screenDx;
-  const ndcDy = -screenDy;
+  const hitPx = toPixel(hitScreen);
+  const tan1Px = toPixel(tan1Screen);
+  const tan2Px = toPixel(tan2Screen);
 
-  // Project drag onto each tangent
+  // Screen-space tangent directions in pixels (y goes down in pixels, matching screenDy)
+  const dir1x = tan1Px.x - hitPx.x;
+  const dir1y = tan1Px.y - hitPx.y;
+  const dir2x = tan2Px.x - hitPx.x;
+  const dir2y = tan2Px.y - hitPx.y;
+
+  // Project drag directly in pixel space
   const len1 = Math.sqrt(dir1x * dir1x + dir1y * dir1y) || 1;
   const len2 = Math.sqrt(dir2x * dir2x + dir2y * dir2y) || 1;
 
-  const proj1 = ndcDx * (dir1x / len1) + ndcDy * (dir1y / len1);
-  const proj2 = ndcDx * (dir2x / len2) + ndcDy * (dir2y / len2);
+  const proj1 = screenDx * (dir1x / len1) + screenDy * (dir1y / len1);
+  const proj2 = screenDx * (dir2x / len2) + screenDy * (dir2y / len2);
 
   // Determine the rotation axis via cross product: normal × dragDirection
   const faceNormal = FACE_NORMALS[face];
