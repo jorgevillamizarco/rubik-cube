@@ -1,49 +1,38 @@
 # Rubik's Cube — Agent Run Summary
 
-## Run: 2026-06-23 — Fix solve algorithm + drag interaction (7 bugs total)
+## Run: 2026-06-23 (Run 2) — Shift-free dragging, Middle layer turns, and Web Worker Solver
 
-### Solve Algorithm (3 bugs — all PASS)
+### Improvements & Refactoring
 
-| # | Bug | Root Cause | Fix |
+| Feature / Fix | Description | Root Cause / Rationale | Fix |
 |---|-----|------------|-----|
-| 1 | Solve button freezes browser | `getSolverFacelets()` read U and L faces front-to-back but cubejs expects back-to-front. Produced invalid cube state → solver searched forever, blocking main thread. | Reversed U and L face coordinate order |
-| 2 | Solver error after animation | `parseMove()` used `sign = -1` for ALL faces. Wrong for negative-axis faces (L/D/B). | `sign = a.l > 0 ? -1 : 1` |
-| 3 | checkSolved() false negative | Euler decomposition fails for 62/64 valid cube orientations due to gimbal-lock. | Replaced with quaternion dot-product against 64 candidate orientations |
+| 1. Shift-Free Layer Dragging | Users can turn layers by dragging directly on the cube. No `Shift` key required. | Old code required holding `Shift` to distinguish between camera rotation and layer turns. | Raycast on pointerdown: if it intersects the cube, disable OrbitControls and turn the layer; otherwise, let camera rotate. |
+| 2. Middle Layer turns (M, E, S) | Enabled twists on middle rows/columns (layer `0`). | Middle layer turns were hard-blocked previously. | Removed guard in `onPointerMove`. Added support for `M`, `E`, and `S` layers (layer coordinate `0`) in `parseMove` and internal notation. |
+| 3. Dynamic Center Mapping | The auto-solver successfully solves the cube even with middle-layer scrambles. | twist on middle layers rotates centers. Solver expects fixed centers. | Added `getDynamicFaceletColorMap` to map facelets dynamically relative to physical center colors on each face. |
+| 4. Solve Orientation snapped | Snapped state returns solved regardless of absolute spatial orientation. | `checkSolved()` required absolute coordinates, failing if centers rotated. | Removed absolute coordinate constraint from `checkSolved()` in favor of snapped rotations and solid face colors. |
+| 5. Web Worker Solver | Heavy Kociemba solver offloaded to background Web Worker thread. | Solving blocked main thread, causing browser freezes and E2E test crashes. | Wrapped solver scripts into a dynamic Blob Worker. Main thread stays fully responsive. |
+| 6. E2E Solve Verification | Playwright tests now verify the full solve sequence end-to-end. | E2E tests previously skipped Solve test because it crashed headless Chrome. | Enabled full E2E verify for Test 3: Solve after scrambling. |
+| 7. Quiet Console Output | Resolved console warning / 404 in browser. | Browser automatically requested `/favicon.ico` which returned 404. | Added `<link rel="icon" href="data:,">` to HTML head. |
 
-### Drag Interaction (4 bugs — all PASS)
-
-| # | Bug | Root Cause | Fix |
-|---|-----|------------|-----|
-| 4 | Wrong rotation axis for drag | Hardcoded axis mapping per face was wrong (e.g., right face Y-drag → Y-axis instead of Z-axis). | Replaced with cross product: `axis = faceNormal × dragDirection` |
-| 5 | Wrong rotation layer | Used clicked face's normal-axis layer instead of cubie position along rotation axis. | `dragLayer = Math.round(dragCubie.userData.grid[axis])` |
-| 6 | Vertical drag direction inverted | Screen pixel Y goes down, NDC Y goes up — not accounted for. | Negate `screenDy` when projecting onto NDC tangents |
-| 7 | Notation from wrong face | Always used clicked face name (front drag → F/F'), but should derive from rotation axis+layer. | Map axis+layer to face letter: x→R/L, y→U/D, z→F/B |
-
-### Verification (Puppeteer headless Chrome)
-
-**Solve algorithm:**
-- ✅ All 18 basic moves produce facelet strings exactly matching cubejs
-- ✅ 5 compound move sequences match cubejs
-- ✅ 3 different 20-move scrambles → autoSolve → all "Solved! 🎉"
-
-**Drag interaction:**
-- ✅ Right face drag up → R, drag down → R'
-- ✅ Front corner drag up → L', drag down → L
-- ✅ Up face drag right → U', drag left → U
-- ✅ 5 drag-scrambled moves → autoSolve → "Solved! 🎉"
-
-### Commits
-- `033dd46` — Fix solve algorithm: facelet order (U/L), move direction (L/D/B), checkSolved gimbal-lock
-- `340b748` — Fix Shift+drag face-turn: cross-product axis detection, corrected layer, screen Y inversion
+### Verification (Playwright E2E results)
+*   ✅ **Test 4: Solve on solved** -> PASS
+*   ✅ **Test 1: Scramble visual** -> PASS
+*   ✅ **Test 5: Reset** -> PASS
+*   ✅ **Test 2: Manual play (Shift-free & Shift-based)** -> PASS (Manual drag register moves)
+*   ✅ **Test 6: No console errors** -> PASS (0 warnings/404s)
+*   ✅ **Test 3: Solve** -> PASS (Scrambled cube solved to solid faces successfully in E2E)
 
 ---
 
-## Previous Run: 2026-06-12 — Fix 5 bugs (Kanban pipeline)
+## Previous Run: 2026-06-23 (Run 1) — Fix solve algorithm + drag interaction (7 bugs total)
 
-| Bug | Description | Status |
-|-----|-------------|--------|
-| 1. Scramble visual | Euler-angle quaternion snap replaced with 64-candidate dot-product approach | PASS |
-| 2. Drag interaction | OrbitControls disabled early when shiftKey pressed | PASS |
-| 3. Move counter | STATE.moves derived from STATE.history.length | PASS |
-| 4. Solve button | Silent guard replaced with "Already solved! 🎉" message | PASS |
-| 5. dragLastPos | Reset to null in onPointerUp | PASS |
+### Solve Algorithm (3 bugs — all PASS)
+*   U/L face coordinate order corrected in `getSolverFacelets()`.
+*   Direction sign corrected in `parseMove()` for negative-axis faces (L/D/B).
+*   Gimbal-lock resolved in `checkSolved()` using quaternion dot-product.
+
+### Drag Interaction (4 bugs — all PASS)
+*   Cross-product axis detection replaced hardcoded per-face mapping.
+*   Corrected `dragLayer` calculation along the rotation axis.
+*   Vertical drag direction inversion fixed in NDC projections.
+*   Notation face derivation fixed using axis + layer instead of clicked face.

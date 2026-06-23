@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Rubik's Cube</title>
+  <link rel="icon" href="data:,">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -105,9 +106,9 @@ const COLORS = {
 };
 
 const FACE_AXIS = {
-  right: { a: 'x', l:  1 }, left: { a: 'x', l: -1 },
-  up:    { a: 'y', l:  1 }, down: { a: 'y', l: -1 },
-  front: { a: 'z', l:  1 }, back: { a: 'z', l: -1 },
+  right: { a: 'x', l:  1 }, left: { a: 'x', l: -1 }, middle: { a: 'x', l: -1 },
+  up:    { a: 'y', l:  1 }, down: { a: 'y', l: -1 }, equator: { a: 'y', l: -1 },
+  front: { a: 'z', l:  1 }, back: { a: 'z', l: -1 }, standing: { a: 'z', l: 1 },
 };
 
 const UNIT = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) };
@@ -123,16 +124,8 @@ const FACE_NORMALS = {
 };
 
 // Map from face name to notation character
-const NOTATION_FROM_NAME = { right: 'R', left: 'L', up: 'U', down: 'D', front: 'F', back: 'B' };
-const NAME_FROM_NOTATION = { R: 'right', L: 'left', U: 'up', D: 'down', F: 'front', B: 'back' };
-const FACELET_COLOR = {
-  [COLORS.up]: 'U',
-  [COLORS.right]: 'R',
-  [COLORS.front]: 'F',
-  [COLORS.down]: 'D',
-  [COLORS.left]: 'L',
-  [COLORS.back]: 'B',
-};
+const NOTATION_FROM_NAME = { right: 'R', left: 'L', up: 'U', down: 'D', front: 'F', back: 'B', middle: 'M', equator: 'E', standing: 'S' };
+const NAME_FROM_NOTATION = { R: 'right', L: 'left', U: 'up', D: 'down', F: 'front', B: 'back', M: 'middle', E: 'equator', S: 'standing' };
 
 const STATE = { cubies: [], history: [], moves: 0, busy: false, solved: true, solverReady: false };
 window.STATE = STATE;
@@ -394,7 +387,7 @@ function turnLayer(axis, layer, angle, dur = ROT_DUR) {
   });
 }
 
-const MOVES = ['R', "R'", 'L', "L'", 'U', "U'", 'D', "D'", 'F', "F'", 'B', "B'"];
+const MOVES = ['R', "R'", 'L', "L'", 'U', "U'", 'D', "D'", 'F', "F'", 'B', "B'", 'M', "M'", 'E', "E'", 'S', "S'"];
 const INV = {};
 MOVES.forEach(m => { INV[m] = m.endsWith("'") ? m[0] : m + "'"; });
 
@@ -415,7 +408,8 @@ function parseMove(notation) {
   // for negative-axis faces (L,D,B) rotate by +π/2.
   // This matches cubejs move conventions exactly.
   const sign = a.l > 0 ? -1 : 1;
-  return { axis: a.a, layer: a.l, angle: sign * dir * Math.PI / 2 * halfTurns };
+  const layer = (name === 'middle' || name === 'equator' || name === 'standing') ? 0 : a.l;
+  return { axis: a.a, layer: layer, angle: sign * dir * Math.PI / 2 * halfTurns };
 }
 
 /**
@@ -505,6 +499,28 @@ function getCubieAtGrid(x, y, z) {
   );
 }
 
+function getDynamicFaceletColorMap() {
+  const map = {};
+  const centers = {
+    up: { x: 0, y: 1, z: 0 },
+    right: { x: 1, y: 0, z: 0 },
+    front: { x: 0, y: 0, z: 1 },
+    down: { x: 0, y: -1, z: 0 },
+    left: { x: -1, y: 0, z: 0 },
+    back: { x: 0, y: 0, z: -1 },
+  };
+  for (const [face, pos] of Object.entries(centers)) {
+    const cubie = getCubieAtGrid(pos.x, pos.y, pos.z);
+    if (cubie) {
+      const color = cubie.userData.stickers[face];
+      if (color !== undefined) {
+        map[color] = NOTATION_FROM_NAME[face];
+      }
+    }
+  }
+  return map;
+}
+
 function getSolverFacelets() {
   // Cube.fromString() uses face order U, R, F, D, L, B.
   // Each face is read top-left to bottom-right from that face's perspective.
@@ -517,25 +533,20 @@ function getSolverFacelets() {
     ['back',  [[ 1, 1, -1], [0, 1, -1], [-1,1, -1], [ 1, 0, -1], [0, 0, -1], [-1,0, -1], [ 1,-1,-1], [0,-1,-1], [-1,-1,-1]]],
   ];
 
+  const faceletColorMap = getDynamicFaceletColorMap();
   let out = '';
   for (const [face, coords] of faces) {
     for (const [x, y, z] of coords) {
       const cubie = getCubieAtGrid(x, y, z);
       const color = cubie?.userData?.stickers?.[face];
-      out += FACELET_COLOR[color] || '?';
+      out += faceletColorMap[color] || '?';
     }
   }
   return out;
 }
 
-/**
- * Check if the cube is solved by verifying all cubie positions and stickers.
- */
 function checkSolved() {
   for (const c of STATE.cubies) {
-    if (c.userData.grid.x !== c.userData.orig.x ||
-        c.userData.grid.y !== c.userData.orig.y ||
-        c.userData.grid.z !== c.userData.orig.z) return false;
     // Check orientation via dot-product to nearest 90° increment quaternion.
     // Euler decomposition fails for compound rotations due to gimbal-lock.
     const q = c.quaternion;
@@ -578,8 +589,11 @@ async function autoSolve() {
   // Lazy-init solver on first Solve click
   if (!STATE.solverReady) {
     showStatus('Loading solver...', 'initializing');
-    await initSolver();
-    if (!STATE.solverReady) return; // init failed
+    try {
+      await initSolver();
+    } catch (e) {
+      return; // init failed
+    }
   }
   // If cube is already solved, show message instead of silent no-op
   if (checkSolved()) {
@@ -606,8 +620,15 @@ async function autoSolve() {
     // Yield main thread so status message renders before blocking solve call
     await new Promise(r => setTimeout(r, 80));
     const facelets = getSolverFacelets();
-    const cube = window.Cube.fromString(facelets);
-    const solution = (cube.solve() || '').trim();
+
+    const worker = getSolverWorker();
+    const solvePromise = new Promise((resolve, reject) => {
+      solverPromiseResolve = resolve;
+      solverPromiseReject = reject;
+      worker.postMessage({ cmd: 'solve', facelets: facelets });
+    });
+
+    const solution = await solvePromise;
     const solutionMoves = solution ? solution.split(/\s+/).filter(Boolean) : [];
     const totalMoves = solutionMoves.length;
 
@@ -650,6 +671,8 @@ async function autoSolve() {
   } finally {
     STATE.busy = false;
     enableButtons();
+    solverPromiseResolve = null;
+    solverPromiseReject = null;
   }
 }
 
@@ -755,30 +778,9 @@ function getPointerPos(e) {
 function onPointerDown(e) {
   if (STATE.busy) return;
 
-  // Disable orbit IMMEDIATELY when shift is pressed, before orbit processes the event
-  if (e.shiftKey) {
-    orbit.enabled = false;
-  } else {
-    orbit.enabled = true;
-    return; // Let orbit handle normal camera rotation
-  }
-
-  e.preventDefault();
-
-  // Reset drag state
-  dragLastPos = null;
-  dragCommitted = false;
-
   const pos = getPointerPos(e);
-  dragStart.x = pos.x;
-  dragStart.y = pos.y;
-  dragActive = false;
-  dragPointerId = e.pointerId;
-  dragAxis = null;
-  dragLayer = null;
-  dragAngle = null;
 
-  // At this point we know shift was pressed (orbit disabled above); proceed with raycast
+  // Raycast to check if we clicked a cubie sticker
   ndc.set((pos.x / innerWidth) * 2 - 1, -(pos.y / innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
 
@@ -794,6 +796,8 @@ function onPointerDown(e) {
 
   const intersects = raycaster.intersectObjects(stickerMeshes, false);
   if (intersects.length > 0) {
+    // Clicked on the cube -> Disable orbit controls, prepare for layer turn
+    orbit.enabled = false;
     dragActive = true;
     dragCubie = intersects[0].object.parent;
     dragHitPt = intersects[0].point.clone();
@@ -803,14 +807,25 @@ function onPointerDown(e) {
       dragFaceNormal.transformDirection(dragCubie.matrixWorld).normalize();
     }
 
-    // Determine which face was clicked
     const clickedFace = faceNormalToFaceName(dragFaceNormal);
     if (clickedFace) {
       dragFace = clickedFace;
-      // dragLayer is computed in onPointerMove after we know the rotation axis,
-      // because it's the cubie's position along that axis (not the face's axis)
-      orbit.enabled = false;
     }
+
+    // Reset drag state
+    dragLastPos = null;
+    dragCommitted = false;
+    dragStart.x = pos.x;
+    dragStart.y = pos.y;
+    dragPointerId = e.pointerId;
+    dragAxis = null;
+    dragLayer = null;
+    dragAngle = null;
+
+    e.preventDefault();
+  } else {
+    // Clicked on background -> Let OrbitControls handle camera rotation
+    orbit.enabled = true;
   }
 }
 
@@ -901,7 +916,6 @@ function onPointerMove(e) {
     const { axis, axisSign, dragSign } = computeDragAxisAndSign(dragFace, accumDx, accumDy);
     if (axis) {
       dragAxis = axis;
-      // Layer = clicked cubie's position along the rotation axis
       dragLayer = Math.round(dragCubie.userData.grid[axis]);
       // Combined sign: axis direction from cross product * drag direction
       dragAngle = axisSign * dragSign;
@@ -919,10 +933,14 @@ function onPointerMove(e) {
     const moveAngle = dragAngle * Math.PI / 2;
 
     // Derive notation from the rotation axis and layer (not the clicked face)
-    // axis x → R (layer 1) or L (layer -1)
-    // axis y → U (layer 1) or D (layer -1)
-    // axis z → F (layer 1) or B (layer -1)
-    const AXIS_FACE = { x: { 1: 'right', '-1': 'left' }, y: { 1: 'up', '-1': 'down' }, z: { 1: 'front', '-1': 'back' } };
+    // axis x → R (layer 1), M (layer 0), L (layer -1)
+    // axis y → U (layer 1), E (layer 0), D (layer -1)
+    // axis z → F (layer 1), S (layer 0), B (layer -1)
+    const AXIS_FACE = {
+      x: { 1: 'right', 0: 'middle', '-1': 'left' },
+      y: { 1: 'up', 0: 'equator', '-1': 'down' },
+      z: { 1: 'front', 0: 'standing', '-1': 'back' }
+    };
     const moveFaceName = AXIS_FACE[dragAxis][dragLayer];
     const moveFaceAxisInfo = FACE_AXIS[moveFaceName];
     // Clockwise from outside: positive-axis faces use -π/2, negative-axis use +π/2
@@ -979,32 +997,85 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+let solverWorker = null;
+let solverPromiseResolve = null;
+let solverPromiseReject = null;
+
+function getSolverWorker() {
+  if (!solverWorker) {
+    const workerCode = `
+      self.onmessage = function(e) {
+        if (e.data.cmd === 'init') {
+          try {
+            importScripts('https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/cube.js');
+            importScripts('https://cdn.jsdelivr.net/npm/cubejs@1.3.2/lib/solve.js');
+            if (!self.Cube || typeof self.Cube.initSolver !== 'function') {
+              throw new Error('cubejs solver library failed to load in worker');
+            }
+            self.Cube.initSolver();
+            self.postMessage({ cmd: 'init', success: true });
+          } catch (err) {
+            self.postMessage({ cmd: 'init', success: false, error: err.message });
+          }
+        } else if (e.data.cmd === 'solve') {
+          try {
+            const facelets = e.data.facelets;
+            const cube = self.Cube.fromString(facelets);
+            const solution = cube.solve();
+            self.postMessage({ cmd: 'solve', success: true, solution: solution });
+          } catch (err) {
+            self.postMessage({ cmd: 'solve', success: false, error: err.message });
+          }
+        }
+      };
+    `;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    solverWorker = new Worker(URL.createObjectURL(blob));
+    solverWorker.onmessage = function(e) {
+      const { cmd, success, solution, error } = e.data;
+      if (cmd === 'init') {
+        if (success) {
+          STATE.solverReady = true;
+          if (solverPromiseResolve) solverPromiseResolve();
+        } else {
+          if (solverPromiseReject) solverPromiseReject(new Error(error));
+        }
+      } else if (cmd === 'solve') {
+        if (success) {
+          if (solverPromiseResolve) solverPromiseResolve(solution);
+        } else {
+          if (solverPromiseReject) solverPromiseReject(new Error(error));
+        }
+      }
+    };
+  }
+  return solverWorker;
+}
+
 /**
  * Initialize the Kociemba two-phase solver.
  * This generates pruning tables (~few seconds) on first call.
  */
 async function initSolver() {
+  if (STATE.solverReady) return;
   showStatus('Loading solver...', 'initializing');
   try {
-    await new Promise((resolve, reject) => {
-      setTimeout(() => {
-        try {
-          if (!window.Cube || typeof window.Cube.initSolver !== 'function') {
-            throw new Error('cubejs solver library failed to load');
-          }
-          window.Cube.initSolver();
-          STATE.solverReady = true;
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      }, 100);
+    const worker = getSolverWorker();
+    const initPromise = new Promise((resolve, reject) => {
+      solverPromiseResolve = resolve;
+      solverPromiseReject = reject;
+      worker.postMessage({ cmd: 'init' });
     });
+    await initPromise;
     document.getElementById('btn-solve').disabled = false;
     hideStatus();
   } catch (e) {
     console.error('[initSolver] Failed to initialize solver:', e);
     showStatus('Solver failed to load', 'error');
+    throw e;
+  } finally {
+    solverPromiseResolve = null;
+    solverPromiseReject = null;
   }
 }
 
