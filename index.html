@@ -830,16 +830,8 @@ function onPointerDown(e) {
     dragActive = true;
     dragCubie = intersects[0].object.parent;
     dragHitPt = intersects[0].point.clone();
-    dragFaceNormal = intersects[0].face.normal.clone();
-
-    if (dragFaceNormal) {
-      dragFaceNormal.transformDirection(dragCubie.matrixWorld).normalize();
-    }
-
-    const clickedFace = faceNormalToFaceName(dragFaceNormal);
-    if (clickedFace) {
-      dragFace = clickedFace;
-    }
+    const clickedFace = intersects[0].object.userData.faceName;
+    dragFace = clickedFace;
 
     logDebug(`[Down] Face: ${clickedFace || 'unknown'}, Cubie orig: (${dragCubie.userData.orig.x}, ${dragCubie.userData.orig.y}, ${dragCubie.userData.orig.z}), grid: (${Math.round(dragCubie.userData.grid.x)}, ${Math.round(dragCubie.userData.grid.y)}, ${Math.round(dragCubie.userData.grid.z)})`);
 
