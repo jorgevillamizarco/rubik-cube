@@ -1,6 +1,6 @@
 # Rubik's Cube — Fix Summary
 
-> Applied: 2026-06-23 | Commit: see git log
+> Applied: 2026-06-23 | Commits: 033dd46, 340b748
 
 ## Bugs Fixed (2026-06-23: Solve Algorithm)
 
@@ -45,31 +45,62 @@ if (Math.abs(bestDot - 1) > 0.01) return false;
 ```
 This is the same approach already used in `turnLayer`'s `snapQuat` function.
 
+## Bugs Fixed (2026-06-23: Drag Interaction)
+
+### 4. Wrong Rotation Axis from Drag Direction (CRITICAL)
+**Symptom:** Shift+drag on a face produces the wrong face turn — e.g., dragging vertically on the right face produces F moves instead of R moves.
+
+**Root Cause:** `computeDragAxisAndSign` had hardcoded axis assignments per face that were wrong. For example, the right face's Y-tangent was mapped to Y-axis rotation, but dragging along Y on the right face should rotate around Z (the axis perpendicular to both the face normal X and the drag direction Y).
+
+**Fix:** Replaced the hardcoded mapping with a proper cross product: `rotation axis = faceNormal × dragDirection`. This is physically correct for all face+direction combinations.
+
+### 5. Wrong Rotation Layer for Drag (CRITICAL)
+**Symptom:** Drag always rotates the clicked face's layer (e.g., x=1 for right face), regardless of which cubie on that face was clicked.
+
+**Root Cause:** `dragLayer` was set to `FACE_AXIS[clickedFace].l` (the face's normal-axis position), not the clicked cubie's position along the rotation axis.
+
+**Fix:** `dragLayer = Math.round(dragCubie.userData.grid[axis])` — computed from the cubie's grid position along the rotation axis, not the face normal.
+
+### 6. Screen Y Inversion (MEDIUM)
+**Symptom:** Vertical drags were detected in the wrong direction — dragging up was interpreted as dragging down.
+
+**Root Cause:** NDC y goes up, pixel y goes down. The projection of pixel deltas onto NDC tangent directions didn't account for this inversion.
+
+**Fix:** Negate `screenDy` when converting pixel deltas to NDC: `const ndcDy = -screenDy`.
+
+### 7. Notation from Wrong Face (MEDIUM)
+**Symptom:** Dragging on the front face always produced F/F' notation, even when the drag was a vertical rotation around X-axis (which should be R/L).
+
+**Root Cause:** The notation letter was always derived from the clicked face name (`NOTATION_FROM_NAME[dragFace]`), not from the rotation axis and layer.
+
+**Fix:** Map rotation axis+layer to the correct face letter:
+- `x axis, layer 1` → R, `layer -1` → L
+- `y axis, layer 1` → U, `layer -1` → D
+- `z axis, layer 1` → F, `layer -1` → B
+
 ## Testing Results (2026-06-23)
 
 | Test | Before | After |
 |------|--------|-------|
 | Solve after scramble (20 moves) | 🔴 Browser freezes | ✅ Solved! 🎉 |
-| Solve after scramble (3 different scrambles) | 🔴 Browser freezes | ✅ All 3 solved |
-| Facelet string matches cubejs (18 basic moves) | 🔴 6/18 mismatch | ✅ 18/18 match |
-| Facelet string matches cubejs (compound sequences) | 🔴 Diverges after 2nd move | ✅ All match |
-| checkSolved() on solved cube after compound rotations | 🔴 False (62/64 fail) | ✅ True |
+| Solve after 3 different scrambles | 🔴 Browser freezes | ✅ All 3 solved |
+| Facelet string vs cubejs (18 basic moves) | 🔴 6/18 mismatch | ✅ 18/18 match |
+| Facelet string vs cubejs (compound sequences) | 🔴 Diverges after 2nd move | ✅ All match |
+| checkSolved() on solved cube | 🔴 False (62/64 fail) | ✅ True |
+| Right face drag up/down | 🔴 Wrong axis (F moves) | ✅ R / R' |
+| Front corner drag up/down | 🔴 F/F' (wrong notation) | ✅ L'/L |
+| Up face drag left/right | 🔴 Wrong direction | ✅ U / U' |
+| Drag-scrambled cube → autoSolve | 🔴 Untestable | ✅ Solved! 🎉 |
 
 ---
 
 ## Previous Fixes (2026-06-12)
 
 ### 1. Sticker Rendering (CRITICAL)
-**Symptom:** After scramble, tiles appeared in wrong positions visually.
-
-**Root Cause:** Sticker material used `depthTest: false, depthWrite: false`.
-
 **Fix:** Changed to `MeshStandardMaterial` with `polygonOffset` on body material (v3.2 approach).
 
-### 2. Drag Interaction (CRITICAL)
-**Symptom:** Shift+Drag on a face did nothing.
-
-**Fix:** Replaced cross-product logic with camera-aware projection. Added `orbit.enabled = false` during Shift+drag.
+### 2. Drag Interaction — OrbitControls Conflict (CRITICAL)
+**Fix:** Added `orbit.enabled = false` during Shift+drag.
 
 ### 3. Move Counter (MEDIUM)
 **Fix:** `STATE.moves` derived from `STATE.history.length` in `updateMoveCounter()`.
